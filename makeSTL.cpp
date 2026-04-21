@@ -4,6 +4,7 @@
 #include <fstream>
 #include <vector>
 #include <cmath>
+#include <cstdint>
 
 struct Point {
     float x, y, z;
