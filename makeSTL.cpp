@@ -35,7 +35,8 @@ void calculateNormal(const Point& a, const Point& b, const Point& c, Point& norm
 
 void writeSTL(const std::vector<Triangle>& triangles, const std::string& filename) {
     std::ofstream file(filename, std::ios::binary);
-    file << "STL\0"; // STL format header
+    char header[80] = {};
+    file.write(header, sizeof(header));
     uint32_t numTriangles = triangles.size();
     file.write(reinterpret_cast<const char*>(&numTriangles), sizeof(numTriangles));
 

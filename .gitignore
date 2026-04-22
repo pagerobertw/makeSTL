@@ -1,0 +1,12 @@
+# Build output
+*.exe
+*.o
+*.s
+*.ii
+
+# Generated STL output
+output.stl
+
+# Diagnostic/temp files from build sessions
+*.txt
+test.cpp

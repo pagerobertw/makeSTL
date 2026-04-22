@@ -1,0 +1,26 @@
+name: Build C++ MakeSTL
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Compile C++ code
+      run: g++ -o makeSTL makeSTL.cpp
+
+    - name: Run the program
+      run: ./makeSTL
+
+    - name: Verify STL output
+      run: |
+        if [ -f "output.stl" ]; then 
+          echo "✓ STL file created successfully"
+        else 
+          echo "✗ STL file not found"
+          exit 1
+        fi
