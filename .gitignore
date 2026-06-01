@@ -5,7 +5,13 @@
 *.ii
 
 # Generated STL output
-output.stl
+*.stl
+
+# Elevation data files (large, sourced externally)
+*.asc
+
+# makeSTL config (project-specific, generated on first run)
+makeSTL.cfg
 
 # Diagnostic/temp files from build sessions
 *.txt
