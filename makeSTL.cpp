@@ -45,6 +45,7 @@ struct stlConfig {
     // Populated after reading the elevation file
     float  minElevation = 0, maxElevation = 0;
     double deltaZ_meters = 0, deltaZ_inches = 0;
+
 };
 
 static std::string toLower(std::string s) {
@@ -113,8 +114,14 @@ void computeGeometry(stlConfig& cfg) {
     cfg.milesNorthSouth = cfg.deltaLat * 69.0468;
     cfg.milesEastWest   = cfg.deltaLon * 69.0468 * std::cos(cfg.midLat * M_PI / 180.0);
     cfg.ratio           = cfg.milesEastWest / cfg.milesNorthSouth;
-    cfg.woodEastWest    = cfg.woodNorthSouth * cfg.ratio;
-    cfg.inchesPerMile   = cfg.woodNorthSouth / cfg.milesNorthSouth;
+
+    // Use whichever wood dimension the user provided; compute the other from the ratio.
+    if (cfg.woodEastWest != 0.0) {
+        cfg.woodNorthSouth = cfg.woodEastWest / cfg.ratio;
+    } else {
+        cfg.woodEastWest = cfg.woodNorthSouth * cfg.ratio;
+    }
+    cfg.inchesPerMile = cfg.woodNorthSouth / cfg.milesNorthSouth;
 
     cfg.zScale_inchesPerMeter = (cfg.inchesPerMile / 1609.34) * cfg.verticalScale;
 }
@@ -152,23 +159,54 @@ bool loadASC(const std::string& filename, stlConfig& cfg,
     return true;
 }
 
-void printConfig(const stlConfig& cfg) {
-    std::cout << "\n=== " << cfg.place << " ===\n";
-    std::cout << "Bounds:        N " << cfg.north << "  S " << cfg.south
-              << "  W " << cfg.west  << "  E " << cfg.east << "\n";
-    std::cout << "NS:            " << cfg.milesNorthSouth << " mi\n";
-    std::cout << "EW:            " << cfg.milesEastWest   << " mi\n";
-    std::cout << "Ratio (EW/NS): " << cfg.ratio           << "\n";
-    std::cout << "Wood:          " << cfg.woodNorthSouth  << "\" NS  x  "
-              << cfg.woodEastWest << "\" EW\n";
-    std::cout << "in/mile:       " << cfg.inchesPerMile   << "\n";
-    std::cout << "verticalScale: " << cfg.verticalScale   << "\n";
-    std::cout << "baseThickness: " << cfg.baseThickness  << "\"\n";
-    std::cout << "Total height:  " << cfg.baseThickness + cfg.deltaZ_inches << "\"\n";
-    std::cout << "Grid:          " << cfg.numCols << " cols x " << cfg.numRows << " rows\n";
-    std::cout << "Elevation:     " << cfg.minElevation << " to " << cfg.maxElevation
-              << " m  (delta = " << cfg.deltaZ_meters << " m = "
-              << cfg.deltaZ_inches << "\" on model)\n\n";
+void printConfigTo(std::ostream& out, const stlConfig& cfg, bool elevationLoaded, bool setupSheet = false) {
+    out << "\n=== " << cfg.place << " ===\n";
+    if (setupSheet) {
+        out << "\n";
+        out << "Date:             \n";
+        out << "Customer:         \n";
+        out << "Wood species:     \n";
+        out << "Data source:      \n";
+        out << "Shore Allowance:  \n";
+        out << "Max cut depth:    \n";
+        out << "\n";
+    }
+    out << "Bounds:        N " << cfg.north << "  S " << cfg.south
+        << "  W " << cfg.west  << "  E " << cfg.east << "\n";
+    out << "NS:            " << cfg.milesNorthSouth << " mi\n";
+    out << "EW:            " << cfg.milesEastWest   << " mi\n";
+    out << "Ratio (EW/NS): " << cfg.ratio           << "\n";
+    out << "Wood:          " << cfg.woodNorthSouth  << "\" NS  x  "
+        << cfg.woodEastWest << "\" EW\n";
+    out << "in/mile:       " << cfg.inchesPerMile   << "\n";
+    out << "verticalScale: " << cfg.verticalScale   << "\n";
+    out << "baseThickness: " << cfg.baseThickness   << "\"\n";
+    if (cfg.numCols > 0 && cfg.numRows > 0)
+        out << "Grid:          " << cfg.numCols << " cols x " << cfg.numRows << " rows\n";
+    else
+        out << "Grid:          (not set)\n";
+    if (elevationLoaded) {
+        out << "Total height:  " << cfg.baseThickness + cfg.deltaZ_inches << "\"\n";
+        out << "Elevation:     " << cfg.minElevation << " to " << cfg.maxElevation
+            << " m  (delta = " << cfg.deltaZ_meters << " m = "
+            << cfg.deltaZ_inches << "\" on model)\n";
+    }
+    out << "\n";
+}
+
+void printConfig(const stlConfig& cfg, bool elevationLoaded) {
+    printConfigTo(std::cout, cfg, elevationLoaded);
+}
+
+void writeSetupSheet(const stlConfig& cfg) {
+    std::string filename = cfg.place + "SetupSheet.txt";
+    std::ofstream f(filename);
+    if (!f.is_open()) {
+        std::cerr << "Warning: could not write " << filename << "\n";
+        return;
+    }
+    printConfigTo(f, cfg, true, true);
+    std::cout << "Wrote " << filename << "\n";
 }
 
 // Tessellate the elevation grid into triangles.
@@ -287,30 +325,40 @@ void addSidesAndBase(const std::vector<std::vector<float>>& grid,
 
 static const std::string CFG_FILE = "makeSTL.cfg";
 
-// Write a makeSTL.cfg template with the current cfg values.
+// Rewrite makeSTL.cfg with all currently known values.
+// Called after every run so the user has a fully populated file to edit.
 void writeConfig(const stlConfig& cfg) {
     std::ofstream f(CFG_FILE);
     if (!f.is_open()) {
         std::cerr << "Warning: could not write " << CFG_FILE << "\n";
         return;
     }
-    f << std::fixed << std::setprecision(3);
+    f << std::fixed << std::setprecision(4);
     f << "# makeSTL.cfg  —  edit and run makeSTL.exe\n\n";
-    f << "BoundsFile     = " << cfg.boundsFile     << "\n";
-    f << "ElevationFile  = " << cfg.elevationFile  << "\n";
+    f << "BoundsFile     = " << cfg.boundsFile << "\n";
+    f << "ElevationFile  = " << cfg.elevationFile << "   # headerless .asc file\n";
     f << "\n";
     f << "WoodNorthSouth = " << cfg.woodNorthSouth
-      << "   # inches, N-S dimension of wood blank\n";
+      << "   # N-S wood dimension (inches); set one of NS/EW, leave the other blank\n";
+    if (cfg.woodEastWest == 0.0)
+        f << "WoodEastWest   =   "
+          << "   # E-W wood dimension (inches); if both set, EW takes precedence\n";
+    else
+        f << "WoodEastWest   = " << cfg.woodEastWest
+          << "   # E-W wood dimension (inches); if both set, EW takes precedence\n";
     f << "VerticalScale  = " << cfg.verticalScale
       << "   # Z exaggeration (1.0 = true scale)\n";
     f << "BaseThickness  = " << cfg.baseThickness
       << "   # inches of solid material below terrain (0.50 to 0.75 typical)\n";
     f << "\n";
-    f << std::defaultfloat;
-    f << "NumCols        = " << cfg.numCols
-      << "   # columns in the .asc file\n";
-    f << "NumRows        = " << cfg.numRows
-      << "   # rows in the .asc file\n";
+    if (cfg.numCols > 0)
+        f << "NumCols        = " << cfg.numCols << "   # columns in the .asc file\n";
+    else
+        f << "NumCols        =    # columns in the .asc file\n";
+    if (cfg.numRows > 0)
+        f << "NumRows        = " << cfg.numRows << "   # rows in the .asc file\n";
+    else
+        f << "NumRows        =    # rows in the .asc file\n";
 }
 
 // Read makeSTL.cfg; override only the keys that are present.
@@ -340,6 +388,7 @@ bool loadConfig(stlConfig& cfg) {
         if      (key == "boundsfile")     cfg.boundsFile     = val;
         else if (key == "elevationfile")  cfg.elevationFile  = val;
         else if (key == "woodnorthsouth") cfg.woodNorthSouth = std::stod(val);
+        else if (key == "woodeastwest")   cfg.woodEastWest   = std::stod(val);
         else if (key == "verticalscale")  cfg.verticalScale  = std::stod(val);
         else if (key == "numcols")        cfg.numCols        = std::stoi(val);
         else if (key == "numrows")        cfg.numRows        = std::stoi(val);
@@ -353,18 +402,20 @@ int main(int argc, char* argv[]) {
     stlConfig cfg;
 
     // Factory defaults — overridden by makeSTL.cfg when it exists.
+    // ElevationFile, NumCols, NumRows intentionally left blank/zero: they must
+    // be set explicitly in the cfg before a full run is attempted.
     cfg.boundsFile     = "CopperMountain.txt";
-    cfg.elevationFile  = "copperMountain.asc";
+    cfg.elevationFile  = "";
     cfg.woodNorthSouth = 4.00;
     cfg.verticalScale  = 1.00;
     cfg.baseThickness  = 0.625;
-    cfg.numCols        = 621;
-    cfg.numRows        = 372;
+    cfg.numCols        = 0;
+    cfg.numRows        = 0;
 
     if (!loadConfig(cfg)) {
         writeConfig(cfg);
-        std::cout << CFG_FILE << " not found — template written with current defaults.\n"
-                  << "Edit it and run makeSTL.exe again.\n";
+        std::cout << CFG_FILE << " not found — template written.\n"
+                  << "Edit " << CFG_FILE << " to set BoundsFile, ElevationFile, and parameters.\n";
         return 0;
     }
 
@@ -372,15 +423,31 @@ int main(int argc, char* argv[]) {
 
     if (!loadBoundsFile(cfg.boundsFile, cfg)) return 1;
     computeGeometry(cfg);
+    writeConfig(cfg);   // update cfg with all computed/default values
+
+    // Determine whether we have everything needed to generate the STL.
+    bool elevationReady = !cfg.elevationFile.empty() && cfg.numCols > 0 && cfg.numRows > 0;
 
     std::vector<std::vector<float>> grid;
-    if (!loadASC(cfg.elevationFile, cfg, grid)) return 1;
+    bool elevationLoaded = false;
 
-    // .asc row 0 is the northernmost row, but y=0 is the bottom of a 3D viewer.
-    // Reverse so y=0 = south (model bottom), y=max = north (model top).
+    if (elevationReady) {
+        elevationLoaded = loadASC(cfg.elevationFile, cfg, grid);
+        if (!elevationLoaded)
+            std::cout << "Printing partial configuration without elevation data.\n";
+    } else {
+        if (cfg.elevationFile.empty())
+            std::cout << "ElevationFile not set — printing partial configuration.\n";
+        else
+            std::cout << "NumCols/NumRows not set — printing partial configuration.\n";
+    }
+
+    printConfig(cfg, elevationLoaded);
+
+    if (!elevationLoaded) return 0;
+
+    // .asc row 0 is the northernmost row; reverse so y=0 = south.
     std::reverse(grid.begin(), grid.end());
-
-    printConfig(cfg);
 
     auto triangles = convertGridToSTL(grid, cfg);
     addSidesAndBase(grid, cfg, triangles);
@@ -388,5 +455,7 @@ int main(int argc, char* argv[]) {
     std::string outputFile = cfg.place + ".stl";
     writeSTL(triangles, outputFile);
     std::cout << "Wrote " << outputFile << " (" << triangles.size() << " triangles)\n";
+
+    writeSetupSheet(cfg);
     return 0;
 }
